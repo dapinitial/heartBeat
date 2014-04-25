@@ -1,0 +1,654 @@
+
+<!DOCTYPE html>
+<html>
+    <head>
+        <!-- Copyright Â© Microsoft Corporation. All Rights Reserved. -->
+        <meta http-equiv="Content=Type" content="text/html; charset=UTF-8" />
+        <meta http-equiv="X-UA-Compatible" content="IE=9" />
+        <meta name="Viewport" content="width=480px,user-scalable=no" />
+        <title>W3C Geolocation Trail Tracker</title>
+        <style type="text/css">
+            body { margin:0; background-color:black; color:white;font-family:Segoe WP Light;}
+            td { text-align:center; font-size:30pt; }
+            td.value { text-align:right; }
+            td.field { text-align:left; }
+            span.check_btn { font-size:40px; }
+            input.check_btn { height:40px; width:40px }
+            input#desc_text { font-size:30px; height:40px; width:90%; margin:0px; padding:0px;}
+            .green_btn { color:white;font-size:20pt; background-color:black; }
+            .red_btn { font-size:20pt; background-color:red; }
+            #more_btn { font-size:20pt; background-color:black; }
+            #return_btn { font-size:20pt; background-color:black; }
+            #save_btn { font-size:20pt; background-color:green; }
+            #saveData_btn { margin-top:25px;}
+            #intro_text { font-family:Segoe WP Light; color:white;font-size:30pt; background-color:black; border-style:none;border-color :black;}
+            #showtext_label { font-family:Segoe WP Light; color:white;font-size:25pt; background-color:black; border-style:none;border-color :black;}
+            #introtext_togglechkbox { width: 40px; height: 40px; }
+            #load_btn { font-family:Segoe WP Light; color:white;font-size:40pt; background-color:black; border-style:none;border-color :black;}
+            #clear_btn { font-family:Segoe WP Light; color:white;font-size:40pt; background-color:black; border-style:none;border-color :black; }
+            #units_btn { font-family:Segoe WP Light; color:white;font-size:40pt; background-color:black; border-style:none;border-color :black;}
+            #ok_button { position:absolute; left:195px;top:660px; }
+            #desc_label{ font-size: 20pt; text-align:left;}
+            #capture_controls
+            {
+				width:470px;
+			}
+        </style>
+    </head>
+    <body>
+    <script type="text/javascript" src="http://ecn.dev.virtualearth.net/mapcontrol/mapcontrol.ashx?v=7.0"></script>
+    <script>
+    var strMessage;
+    var bRouteLoaded = false;
+
+    var bActive = false;            // Determines whether capture is running
+
+    // Use DOM Storage to keep settings
+    var settings = { metric:false,               // Default units
+                     intro:true,                // Show intro help
+                     DOM_STORAGE_KEY:"settings"
+                   };
+
+    var startTick;
+    var currentSpeed;               // in m/s
+
+    var watchId;
+    var timerId;
+    var routeMain;
+    var routeIndex;
+    var previousPosition;
+    var positionOptions = { maximumAge:0,               // no cached locations
+                            timeout:30000,              // 30 sec timeout
+                            enableHighAccuracy:true     // Default to high accuracy
+                          };
+    var map = null;
+
+    function main()
+    {
+        loadSettings();
+        displayMode(settings.intro ? 3 : 1);
+        if (navigator.geolocation && navigator.geolocation.getCurrentPosition)
+        {
+            // Set up UI
+        
+            var mapOptions = {credentials:"AtoTM_zsq_GN8JeJ0277f3JGUOA0j4kpUlfGWaBDNxmyTKNFOtvpLN_2_D3uw-xI",
+                                      height: 380,
+                                      width: 470,
+                                      mapTypeId: Microsoft.Maps.MapTypeId.aerial,
+                                      disableUserInput:false,
+                                      enableSearchLogo:false,
+                                      showCopyright:false,
+                                      showDashboard:false,
+                                      showScalebar:false,
+                                      showMapTypeSelector:false};
+
+            map = new Microsoft.Maps.Map(document.getElementById("mapDiv"), mapOptions);
+        }
+        else
+        {
+            strMessage = "Sorry, this web page uses geolocation which isn't available with this browser.";
+            alert(strMessage);
+        }
+    }
+
+    function RouteSummary()
+    {
+        this.elapsedTime = 0;   // in msec
+        this.totalDistance = 0; // in km
+        this.maxSpeed = 0;      // in m/s
+        this.routeData = new Array();
+        this.locations = new Array();
+    }
+
+    function resetCounters()
+    {
+        routeMain = new RouteSummary();
+        previousPosition = null;
+        routeIndex = 0;
+        clearDisplay();
+    }
+
+    function start()
+    {
+        bRouteLoaded = false;
+        bActive = true;
+        startTick = new Date().getTime();
+        positionOptions.enableHighAccuracy = settings.highAccuracy;  
+        watchId = navigator.geolocation.watchPosition(locHandler, errHandler, positionOptions);
+        timerId = window.setInterval("timerHandler()", 250);
+    }
+
+    function stop()
+    {
+        bActive = false;
+        navigator.geolocation.clearWatch(watchId);  
+        window.clearInterval(timerId);
+    }
+
+    function isSamePosition(position1, position2) 
+    {
+        if (position1.coords.latitude != position2.coords.latitude)
+            return false;
+
+        if (position1.coords.longitude != position2.coords.longitude)
+            return false;
+            
+        return true;
+    }
+
+    function locHandler(position) 
+    {
+        var dist;
+
+        // Check for duplicate locations
+        if (previousPosition != null && isSamePosition(position, previousPosition))
+            return;
+            
+        var lat = position.coords.latitude;
+        var lon = position.coords.longitude;
+        routeMain.locations[routeIndex] = new Microsoft.Maps.Location(lat, lon);
+        if (routeMain.lat_min == undefined || lat < routeMain.lat_min)
+            routeMain.lat_min = lat;
+        if (routeMain.lat_max == undefined || lat > routeMain.lat_max)
+            routeMain.lat_max = lat;
+        if (routeMain.lon_min == undefined || lon < routeMain.lon_min)
+            routeMain.lon_min = lon;
+        if (routeMain.lon_max == undefined || lon > routeMain.lon_max)
+            routeMain.lon_max = lon;
+
+        routeMain.routeData[routeIndex++] = position;
+        if (previousPosition == null)
+            dist = 0;
+        else
+            dist = calculateDistance(position, previousPosition);
+            
+        previousPosition = position;
+        routeMain.totalDistance += dist;
+        
+        updateDisplay(position);
+    }
+
+    function errHandler(error) 
+    {
+        switch (error.code)
+        {
+            case error.PERMISSION_DENIED:
+            if (positionOptions.enableHighAccuracy)
+            {
+                settings.highAccuracy = false;
+                stop();
+                start();
+            }
+            else
+            {
+                strMessage = "The trip computer was not allowed to access the location.";
+                alert(strMessage);
+                stop();
+            }
+            break;
+
+            case error.POSITION_UNAVAILABLE:
+            strMessage = "The position could not be determined.  Check the browser geolocation settings and try again.";
+            break;
+
+            case error.TIMEOUT:
+            strMessage = "The system was unable to obtain the position in the desired time.  Try moving away from buildings and other obstructions.";
+            break;
+        }
+    }
+
+    function timerHandler() 
+    {
+        routeMain.elapsedTime = new Date().getTime() - startTick;
+        updateTime();
+    }
+
+    function calculateDistance(position1, position2)
+    {
+        if (position1 == undefined || position2 == undefined)
+            return 0;
+            
+        // Convert to radians
+        var lat1 = position1.coords.latitude * 0.017453293;
+        var lat2 = position2.coords.latitude * 0.017453293;
+        var lon1 = position1.coords.longitude * 0.017453293;
+        var lon2 = position2.coords.longitude * 0.017453293;
+
+        // Use spherical method to calculate distance returned in km.
+        var dist = Math.acos(Math.sin(lat1)*Math.sin(lat2) + Math.cos(lat1) *
+            Math.cos(lat2) * Math.cos(lon2-lon1)) * 6371;
+        
+        return isNaN(dist) ? 0.0 : dist;
+    }
+
+    function runstop()
+    {
+        if (bActive)
+            stop();
+        else
+        {
+            resetCounters();
+            start();
+        }
+
+        document.getElementById("runstop_btn").value = bActive ? "Stop": "Start";
+		document.getElementById("runstop_btn").src = bActive ? "redbutton.png": "greenbutton.png";
+        var bSave = (!bRouteLoaded && routeMain != undefined && routeMain.routeData != null && routeMain.routeData.length > 0);
+        document.getElementById("save_btn").style.display = bSave ? "block": "none";
+        document.getElementById("more_btn").style.display = !bSave ? "block": "none";
+    }
+
+    function startCapture()
+    {
+        if (bActive)
+            return;
+
+        resetCounters();
+        start();
+    }
+
+    function stopCapture()
+    {
+        if (!bActive)
+            return;
+
+        stop();
+    }
+
+    function saveData()
+    {
+        if (bActive)
+            return;
+            
+        if (routeMain == undefined || routeMain.routeData == null || routeMain.routeData.length == 0)
+            return alert("There is no route data to save.");
+
+        document.getElementById("saveData_btn").style.display = "block";
+        document.getElementById("desc_text").style.display = "block";
+        document.getElementById("desc_label").style.display = "block";
+        document.getElementById("desc_text").focus();
+    }
+
+
+    function saveDataComplete()
+    {
+        var description = document.getElementById("desc_text").value;
+        if (description.length == 0)
+            return alert("Please re-enter a description for this route");
+        
+        // Convert routeData to JSON string
+        var myJSONText = "({ elapsedTime: " + routeMain.elapsedTime + ", totalDistance: " + 
+            routeMain.totalDistance + ", maxSpeed: " + routeMain.maxSpeed + ", lat_min: " +
+            routeMain.lat_min + ", lat_max: " + routeMain.lat_max + ", lon_min: " +
+            routeMain.lon_min;
+        myJSONText += ", lon_max: " + routeMain.lon_max + ", routeData:[";
+        for (var i=0; i<routeMain.routeData.length; i++)
+        {
+            myJSONText += "{coords: {accuracy: " + routeMain.routeData[i].coords.accuracy + 
+            ", altitude: " + routeMain.routeData[i].coords.altitude +
+            ", altitudeAccuracy: " + routeMain.routeData[i].coords.altitudeAccuracy +
+            ", heading: " + routeMain.routeData[i].coords.heading +
+            ", latitude: " + routeMain.routeData[i].coords.latitude +
+            ", longitude: " + routeMain.routeData[i].coords.longitude +
+            ", speed: " + routeMain.routeData[i].coords.speed +
+            "}, timestamp: " + routeMain.routeData[i].timestamp + "},";
+        }
+        myJSONText = myJSONText.substring(0, myJSONText.length - 1) + "] })";
+        
+        localStorage.setItem(description, myJSONText);
+        alert("Route saved.");
+
+        document.getElementById("save_btn").style.display = "none";
+        document.getElementById("more_btn").style.display = "block";
+        document.getElementById("saveData_btn").style.display = "none";
+        document.getElementById("desc_text").style.display = "none";
+        document.getElementById("desc_label").style.display = "none";
+
+        document.getElementById("desc_text").value = "";
+        bRouteLoaded = true;    // Prevents from saving this route again
+
+    }
+
+    function introToggle()
+    {
+        settings.intro = !settings.intro;
+        saveSettings();
+        document.getElementById("introtext_togglechkbox").focus();
+        displayMode(3);
+    }
+
+    function loadData()
+    {
+        if (bActive)
+            return;
+
+        if (localStorage.length <= 1)
+            return alert("There are no stored routes.");
+        else
+        {
+            var selectElement = document.getElementById("load_select");
+            selectElement.style.display = "block";
+            var index = 0;
+            for (var i=0; i<localStorage.length; i++)
+                if (localStorage.key(i) != settings.DOM_STORAGE_KEY)
+                {
+                    selectElement.options[index] = new Option(localStorage.key(i), index);
+                    index++;
+                }
+
+            var tick = new Date().getTime();
+            
+            // On WP7, this next statement is a synchronous call and we use that behavior to our benefit.
+            selectElement.click();
+
+            // Hide the selection box
+            selectElement.style.display = "none";
+            
+            var keyName = localStorage.key(selectElement.options.selectedIndex+1);
+            var myJSONText = localStorage.getItem(keyName);
+
+            routeMain = eval(myJSONText);
+            routeMain.locations = new Array();
+            var lat, lon, timestamp;
+            for (var i=0; i<routeMain.routeData.length; i++)
+            {
+                lat = routeMain.routeData[i].coords.latitude;
+                lon = routeMain.routeData[i].coords.longitude;
+                routeMain.locations[i] = new Microsoft.Maps.Location(lat, lon);
+            }
+            getMap();
+            updateDisplay();
+            bRouteLoaded = true;
+            displayMode(1);
+        }
+    }
+
+
+    function clearData()
+    {
+        if (bActive)
+            return;
+
+        if (localStorage.length == 0)
+            return alert("There are no stored routes.");
+        
+        if (confirm("Do you wish to delete all saved routes?"))
+        {
+            localStorage.clear();
+            settings.intro = true;
+            saveSettings();
+            alert("All stored routes have been cleared.");
+        }
+    }
+
+    function getMap()
+    {   
+        if (routeMain == undefined || routeMain.routeData == null || routeMain.routeData.length == 0)
+        {
+            // There is no route data to map - display world map
+            return;
+        }
+
+        var viewRect = Microsoft.Maps.LocationRect.fromCorners(new Microsoft.Maps.Location(routeMain.lat_min,routeMain.lon_min), new Microsoft.Maps.Location(routeMain.lat_max,routeMain.lon_max));
+        map.setView({bounds: viewRect});
+
+        if (routeMain.routeData.length == 1)
+        {
+            // Get the existing options.
+            var options = map.getOptions();
+
+            // Set the zoom level of the map
+            options.zoom = 7;
+            map.setView(options);
+        }
+        
+        // Create a polyline
+        var line = new Microsoft.Maps.Polyline(routeMain.locations);
+
+        // If there are any entities, remove them.
+        if (map.entities.getLength() > 0)
+            map.entities.clear();
+            
+        // Add the polyline to the map
+        map.entities.push(line);
+    }
+
+    function changeUnits()
+    {
+        var unitSelect = document.getElementById("unit_select");
+        unitSelect.style.display = "block";
+        unitSelect.options.selectedIndex = settings.metric ? 1 : 0;
+        var selected = unitSelect.options.selectedIndex;
+        var tick = new Date().getTime();
+        
+        // On WP7, this next statement is a synchronous call and we use that behavior to our benefit.
+        unitSelect.click();
+        
+        // Hide the combobox on WP7.  Do this by measuring the time difference from before/after the
+        // above statement.  If it is >100ms, we can assume it is a synchronous call
+        if (new Date().getTime() - tick > 100 && selected == unitSelect.options.selectedIndex)
+            unitSelect.style.display = "none";
+    }
+
+    function changeUnitsChangeHandler()
+    {
+        var unitSelect = document.getElementById("unit_select");
+        var selected = unitSelect.options.selectedIndex;
+        unitSelect.style.display = "none";
+        
+        settings.metric = (selected == 1);
+        saveSettings();
+        updateDisplay();
+    }
+
+    function saveSettings()
+    {
+        var myJSONText = "({ metric: " + settings.metric + ", intro: " + settings.intro + ", DOM_STORAGE_KEY: '" + 
+        settings.DOM_STORAGE_KEY + "' })";
+
+        localStorage.setItem(settings.DOM_STORAGE_KEY, myJSONText);
+    }
+
+    function loadSettings()
+    {
+        var myJSONText = localStorage.getItem(settings.DOM_STORAGE_KEY);
+        if (myJSONText != null)
+            settings = eval(myJSONText);
+        else
+            saveSettings();   // save default settings if not available.
+    }
+
+    function updateTime()
+    {
+        var msec = routeMain.elapsedTime % 1000;
+        var totalSeconds = (routeMain.elapsedTime / 1000);
+        var hours = parseInt(totalSeconds / 3600);
+        var mins = parseInt((totalSeconds - (hours * 3600))/ 60);
+        if (mins < 10)
+           mins = "0" + mins;
+        var secs = (totalSeconds % 60).toFixed(1);
+        if (secs < 10)
+           secs = "0" + secs;
+        
+        // Update elapsed time
+        document.getElementById("time").innerText = hours + ":" + mins + ":" + secs;
+    }
+
+    function clearDisplay()
+    {
+        document.getElementById("distance").innerText = "";
+        document.getElementById("avgspeed").innerText = "";
+    }
+
+    function updateDisplay(position)
+    {
+        if (position != undefined && position.coords.speed != null && !isNaN(position.coords.speed))
+        {
+            currentSpeed = (position.coords.speed);
+            if (currentSpeed > routeMain.maxSpeed)
+                routeMain.maxSpeed = currentSpeed;
+        }
+        
+        // Distance
+        if (routeMain == undefined || routeMain.totalDistance == undefined)
+            document.getElementById("distance").innerText = settings.metric ? "0.00 km" : "0.00 mi";
+        else
+            document.getElementById("distance").innerText = settings.metric ? routeMain.totalDistance.toFixed(2) +" km" : (routeMain.totalDistance / 1.609334).toFixed(2) + " mi";
+
+        //Avg Speed
+        if (routeMain == undefined || routeMain.elapsedTime == 0 || routeMain.elapsedTime == undefined)
+            document.getElementById("avgspeed").innerText = settings.metric ? "0.0 m/s" : "0.0 mph";
+        else
+            document.getElementById("avgspeed").innerText = settings.metric ? (1000000 * (routeMain.totalDistance/routeMain.elapsedTime)).toFixed(1) + " m/s" : (2236900 * (routeMain.totalDistance/routeMain.elapsedTime)).toFixed(1) + " mph";
+
+        // Update the time
+        if (routeMain != undefined && routeMain.elapsedTime != undefined)
+            updateTime();
+    }
+
+    function displayMode(uiMode)
+    {
+        // Set up UI for desired mode
+        switch (uiMode)
+        {
+        case 1:     // capture mode
+            setUIdisplay(true, false, false);
+            getMap();
+            break;
+        case 2:     // options mode
+            setUIdisplay(false, true, false);
+            break;
+        case 3:     // quick-start mode
+            setUIdisplay(false, false, true);
+            break;
+        }
+    }
+
+    function setUIdisplay(bCapture, bReview, bQuickStart)
+    {
+        var bSave = !bRouteLoaded && !bActive && (routeMain != undefined && routeMain.routeData != null && routeMain.routeData.length > 0);
+        document.getElementById("save_btn").style.display = (bSave && bCapture) ? "block": "none";
+        document.getElementById("more_btn").style.display = (!bSave && bCapture) ? "block": "none";
+        
+        // Capture display elements
+        document.getElementById("mapDiv").style.display = bCapture ? "block": "none";
+        document.getElementById("runstop_btn").style.display = bCapture ? "block": "none";
+        document.getElementById("runstop_btn").value = bActive ? "Stop": "Start";
+
+        document.getElementById("distance_field").style.display = bCapture ? "block": "none";
+        document.getElementById("distance").style.display = bCapture ? "block": "none";
+        document.getElementById("time_field").style.display = bCapture ? "block": "none";
+        document.getElementById("time").style.display = bCapture ? "block": "none";
+        document.getElementById("avgspeed_field").style.display = bCapture ? "block": "none";
+        document.getElementById("avgspeed").style.display = bCapture ? "block": "none";
+        
+        // Options display elements
+        document.getElementById("load_btn").style.display = bReview ? "block": "none";
+        document.getElementById("clear_btn").style.display = bReview ? "block": "none";
+        document.getElementById("units_btn").style.display = bReview ? "block": "none";
+        document.getElementById("return_btn").style.display = (bReview || bQuickStart) ? "block": "none";
+        document.getElementById("saveData_btn").style.display = "none";
+        document.getElementById("desc_text").style.display = "none";
+        document.getElementById("desc_label").style.display = "none";
+        document.getElementById("load_select").style.display = "none";
+        document.getElementById("unit_select").style.display = "none";
+        
+        // Quick start display elements
+        document.getElementById("intro_text").style.display = bQuickStart ? "block": "none";
+        document.getElementById("introtext_togglechkbox").style.display = bQuickStart ? "inline": "none";
+        document.getElementById("showtext_label").style.display = bQuickStart ? "inline": "none";
+        }
+
+        window.onload = main;
+    </script>
+    <div id="capture_controls">
+        <div id='mapDiv' style="position:relative; width:470px; height:380px;"  onclick="getMap();"></div>
+        <table>
+            <tr>
+                <td>
+                    <input class="green_btn" id="runstop_btn" type="image" src="greenbutton.png" value="Start" onclick="runstop();" ></input>
+                </td>
+            
+                <td>
+                    <input id="save_btn" type="image" src="savebutton.png" onclick="saveData();" ></input>
+                </td>
+
+                <td>
+                    <input id="more_btn" type="image" src="morebutton.png" onclick="displayMode(2);" ></input>
+                </td>
+            </tr>
+        </table>
+        <table>
+            <tr><td height="10px"></td></tr>
+            <tr>
+                <td class="field" id="distance_field" height="70px">Distance:</td>
+                <td class="value" id="distance"></td>
+            </tr>
+            <tr>
+                <td class="field" id="time_field" height="90px">Time:</td>
+                <td class="value" id="time"></td>
+            </tr>
+            <tr>
+                <td class="field" id="avgspeed_field">Avg Speed:</td>
+                <td class="value" id="avgspeed"></td>
+            </tr>
+        </table>
+    </div>
+
+    <div id="storereview_controls">
+        <table>
+            <tr>
+                <td>
+                    <p id="intro_text"/>
+                    This demo tracks your trip using HTML5 geolocation, plots your trail on the map and saves it into HTML5 local storage.
+                    </p>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <input id="introtext_togglechkbox" type="checkbox" checked onchange="introToggle();" />
+                    <label id="showtext_label" for="introtext_togglechkbox">Always show this text</label>
+                    </input>
+                </td>
+            </tr>
+            <tr>
+                <td>
+                     <input id="load_btn" type="button" value="load a session" onclick="loadData();" />
+                </td>
+            </tr>
+            <tr>
+                <td>
+                    <input id="clear_btn" type="button" value="clear all data" onclick="clearData();" />
+                </td>
+            </tr>
+            <tr>
+                <td>
+                     <input id="units_btn" type="button" value="select units" onclick="changeUnits();" />
+                </td>
+            </tr>
+            <tr>
+                <td colspan="2">
+                    <select id="unit_select" onchange="changeUnitsChangeHandler();">
+                        <option>English</option>
+                        <option>Metric</option>
+                    </select>
+                </td>
+            </tr>
+            <tr>
+                <td colspan="2">
+                    <span id="desc_label">Session Name:</span>
+                    <span><input id="desc_text" type="text" /></span>
+                </td>
+                <td><input id="saveData_btn" type="image" src="okbutton.png" value="Done" onclick="saveDataComplete();" /></td>
+            </tr>
+            <tr>
+                <td colspan="2">
+                    <select id="load_select">
+                    </select>
+                </td>
+            </tr>
+        </table>
+    </div>
+    <div id="ok_button"><input id="return_btn" type="image" src="okbutton.png" value="Return" onclick="displayMode(1);" /></div>
+    </body>
+</html>
